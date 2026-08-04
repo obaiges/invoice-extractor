@@ -1,0 +1,114 @@
+<div class="result">
+  <div class="banner" [class.banner-partial]="partial">
+    @if (partial) {
+      La factura se extrajo de forma parcial:
+      <strong>{{ result().missing_fields.length }}</strong>
+      campo(s) no se pudieron detectar.
+    } @else {
+      Factura extraída correctamente.
+    }
+  </div>
+
+  @if (warnings.length > 0) {
+    <div class="warnings">
+      <h3>Avisos</h3>
+      <ul>
+        @for (warning of warnings; track $index) {
+          <li>{{ warning }}</li>
+        }
+      </ul>
+    </div>
+  }
+
+  <section class="section">
+    <h2>Datos de la factura</h2>
+    <div class="fields">
+      <app-field
+        label="Número de factura"
+        [value]="invoice.invoice_number"
+        [class.field-missing]="isMissing('invoice_number')"
+      />
+      <app-field label="Fecha de emisión" [value]="date(invoice.issue_date)" />
+      <app-field label="Vencimiento" [value]="date(invoice.due_date)" />
+      <app-field label="Moneda" [value]="invoice.currency" />
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="section">
+      <h2>Emisor</h2>
+      <div class="fields">
+        <app-field label="Nombre" [value]="invoice.seller.name" />
+        <app-field label="NIF / CIF" [value]="invoice.seller.tax_id" />
+        <app-field label="Dirección" [value]="invoice.seller.address" />
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Receptor</h2>
+      <div class="fields">
+        <app-field label="Nombre" [value]="invoice.buyer.name" />
+        <app-field label="NIF / CIF" [value]="invoice.buyer.tax_id" />
+        <app-field label="Dirección" [value]="invoice.buyer.address" />
+      </div>
+    </section>
+  </div>
+
+  <section class="section">
+    <h2>Líneas de detalle ({{ invoice.lines.length }})</h2>
+    @if (invoice.lines.length > 0) {
+      <div class="table-wrap">
+        <table class="lines">
+          <thead>
+            <tr>
+              <th>Descripción</th>
+              <th class="num">Cantidad</th>
+              <th class="num">Precio unitario</th>
+              <th class="num">IVA</th>
+              <th class="num">Importe</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (line of invoice.lines; track $index) {
+              <tr>
+                <td>{{ line.description ?? '—' }}</td>
+                <td class="num">{{ quantity(line.quantity) ?? '—' }}</td>
+                <td class="num">{{ money(line.unit_price) ?? '—' }}</td>
+                <td class="num">{{ line.tax_rate != null ? line.tax_rate + ' %' : '—' }}</td>
+                <td class="num">{{ money(line.total) ?? '—' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty">No se detectaron líneas de detalle.</p>
+    }
+  </section>
+
+  <section class="section">
+    <h2>Totales</h2>
+    <div class="totals">
+      <div class="totals-row">
+        <span>Base imponible</span>
+        <span>{{ money(invoice.subtotal) ?? 'No detectado' }}</span>
+      </div>
+      @for (tax of invoice.taxes; track $index) {
+        <div class="totals-row">
+          <span>IVA {{ tax.rate != null ? tax.rate + ' %' : '' }}</span>
+          <span>{{ money(tax.amount) ?? 'No detectado' }}</span>
+        </div>
+      }
+      @if (invoice.taxes.length === 0) {
+        <div class="totals-row">
+          <span>Desglose de IVA</span>
+          <span class="missing-text">No detectado</span>
+        </div>
+      }
+      <div class="totals-row total">
+        <span>Total</span>
+        <strong>{{ money(invoice.total) ?? 'No detectado' }}</strong>
+      </div>
+    </div>
+  </section>
+</div>

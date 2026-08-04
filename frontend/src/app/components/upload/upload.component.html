@@ -1,0 +1,22 @@
+<div
+  class="drop-zone"
+  [class.dragging]="isDragging"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave()"
+  (drop)="onDrop($event)"
+>
+  <input
+    #fileInput
+    type="file"
+    [id]="inputId"
+    [accept]="acceptValue"
+    class="hidden-input"
+    (change)="onFileInput($event)"
+  />
+  <label [for]="inputId" class="drop-zone-label">
+    <span class="icon" aria-hidden="true">&#8682;</span>
+    <span class="title">Arrastra tu factura aquí</span>
+    <span class="hint">o haz clic para seleccionarla desde tu equipo</span>
+    <span class="formats">PDF, PNG, JPG o WEBP · máx. 15 MB</span>
+  </label>
+</div>

@@ -1,0 +1,44 @@
+<main class="app">
+  <header class="app-header">
+    <h1>Extractor de facturas</h1>
+    <p class="subtitle">
+      Sube una factura en PDF o imagen y obtén sus datos estructurados.
+      Los campos que no se puedan extraer se indican explícitamente.
+    </p>
+  </header>
+
+  <div class="card">
+    @if (loading) {
+      <div class="loading">
+        <span class="spinner" aria-hidden="true"></span>
+        <p class="loading-text">
+          Procesando <strong>{{ fileName }}</strong>...
+        </p>
+        <p class="loading-hint">La extracción puede tardar unos segundos.</p>
+      </div>
+    } @else if (result) {
+      <div class="toolbar">
+        <span class="file-chip">{{ fileName }}</span>
+        <button type="button" class="button button-secondary" (click)="reset()">
+          Procesar otra factura
+        </button>
+      </div>
+      <app-result [result]="result" />
+    } @else {
+      <app-upload
+        (fileSelected)="onFileSelected($event)"
+        (errorMessage)="onValidationError($event)"
+      />
+    }
+
+    @if (errorMessage && !loading) {
+      <div class="alert alert-error" role="alert">
+        <strong>No se pudo procesar el documento.</strong>
+        <p>{{ errorMessage }}</p>
+        <button type="button" class="button button-secondary" (click)="reset()">
+          Volver a intentar
+        </button>
+      </div>
+    }
+  </div>
+</main>
