@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Configuración de la aplicación, leída de variables de entorno o `.env`."""
 
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.6-flash"
     max_file_size_mb: int = 15
     max_image_bytes: int = 18 * 1024 * 1024
     cors_origins: str = "http://localhost:4200"

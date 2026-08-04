@@ -46,11 +46,14 @@ Se ha elegido la **opción A (LLM)** con **Gemini**, con esta justificación:
    localmente (PyMuPDF, a 150 DPI) y las envía como bytes **inline** (base64). Esto evita
    las limitaciones de subida de ficheros del plan gratuito y mantiene el coste bajo.
 3. **Free tier.** El usuario eligió Gemini porque Google AI Studio ofrece una capa gratuita
-   (modelo `gemini-2.5-flash`), suficiente para una prueba y una demo.
+   (modelo `gemini-3.6-flash`), suficiente para una prueba y una demo.
 4. **Calidad de extracción.** La generación controlada de JSON (`response_mime_type` +
    `response_schema`) fuerza la estructura de salida, y el prompt exige `null` ante la
    duda, lo que se traduce directamente en el requisito de "indicar explícitamente lo que
-   no se puede extraer".
+   no se puede extraer". Si el modelo configurado deja de estar disponible para la cuenta
+   (Google retira modelos antiguos), el proveedor **reintenta automáticamente con una
+   cadena de modelos más recientes** (`gemini-3.6-flash`, `gemini-3.5-flash`,
+   `gemini-3.1-flash-lite`, `gemini-2.5-flash-lite`) en lugar de fallar.
 
 ### Diseño del sistema
 
@@ -122,9 +125,11 @@ Se ha elegido la **opción A (LLM)** con **Gemini**, con esta justificación:
 2. Pulsa **"Create API key"** → **"Create API key in new project"**.
 3. Copia la clave generada (empieza por `AIza...`).
 
-La capa gratuita de AI Studio permite peticiones con el modelo `gemini-2.5-flash`
+La capa gratuita de AI Studio permite peticiones con el modelo `gemini-3.6-flash`
 (configurable con `GEMINI_MODEL`). Las claves gratuitas tienen límites de peticiones por
-minuto: si recibes un error de cuota, espera unos segundos y reintenta.
+minuto: si recibes un error de cuota, espera unos segundos y reintenta. Si el modelo
+configurado ya no está disponible para tu clave, el backend reintenta automáticamente con
+modelos más recientes.
 
 ---
 
@@ -142,7 +147,7 @@ Y rellena, como mínimo:
 
 ```dotenv
 GEMINI_API_KEY=AIza...          # tu clave de AI Studio
-GEMINI_MODEL=gemini-2.5-flash   # modelo a usar
+GEMINI_MODEL=gemini-3.6-flash   # modelo a usar
 ```
 
 Opciones disponibles (todas opcionales salvo la clave):
@@ -150,7 +155,7 @@ Opciones disponibles (todas opcionales salvo la clave):
 | Variable          | Descripción                                        | Valor por defecto        |
 |-------------------|----------------------------------------------------|--------------------------|
 | `GEMINI_API_KEY`  | Clave de API de Gemini (**obligatoria**)           | —                        |
-| `GEMINI_MODEL`    | Modelo de Gemini                                   | `gemini-2.5-flash`       |
+| `GEMINI_MODEL`    | Modelo de Gemini (con fallback a modelos más recientes si no está disponible) | `gemini-3.6-flash` |
 | `MAX_FILE_SIZE_MB`| Tamaño máximo del documento subido                 | `15`                     |
 | `CORS_ORIGINS`    | Orígenes permitidos (separados por coma)           | `http://localhost:4200`  |
 
