@@ -223,12 +223,50 @@ def _clean_str(value: object) -> str | None:
     return None
 
 
+# El modelo a veces rellena un campo que no sabe con texto explicativo en vez
+# de null (p. ej. "missing_tax_id_goes_to_null_instead_as_per_rules"). Se
+# detecta y se descarta para que el campo aparezca como "No detectado".
+_PLACEHOLDER_EXACT = {
+    "null", "none", "n/a", "n.a.", "n/d", "nd", "na", "-", "--", "---",
+    "unknown", "missing", "not found", "not available", "not provided",
+    "no disponible", "no encontrado", "no consta", "no aplica",
+    "no proporcionado", "desconocido", "sin dato",
+}
+
+_PLACEHOLDER_KEYWORDS = (
+    "missing", "unknown", "notfound", "notavailable", "notprovided", "null",
+    "instead", "rules", "placeholder", "nodisponible", "noencontrado",
+    "noconsta", "noaplica", "noproporcionado", "desconocido", "no_se",
+)
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    """Devuelve `True` si el valor parece texto de relleno y no un dato real."""
+    if not value:
+        return False
+    lowered = value.strip().lower()
+    if lowered in _PLACEHOLDER_EXACT:
+        return True
+    if any(sep in value for sep in (" ", "_", "-")):
+        compact = re.sub(r"[^a-z0-9]", "", lowered)
+        return any(word in compact for word in _PLACEHOLDER_KEYWORDS)
+    return False
+
+
+def _clean_tax_id(value: object) -> str | None:
+    """Limpia un NIF/CIF/VAT y descarta valores placeholder."""
+    cleaned = _clean_str(value)
+    if cleaned is None or _looks_like_placeholder(cleaned):
+        return None
+    return cleaned
+
+
 def _parse_party(raw: object) -> Party:
     if not isinstance(raw, dict):
         return Party()
     return Party(
         name=_clean_str(_pick(raw, PARTY_ALIASES["name"])),
-        tax_id=_clean_str(_pick(raw, PARTY_ALIASES["tax_id"])),
+        tax_id=_clean_tax_id(_pick(raw, PARTY_ALIASES["tax_id"])),
         address=_clean_str(_pick(raw, PARTY_ALIASES["address"])),
     )
 
@@ -278,6 +316,18 @@ def build_invoice(payload: object) -> tuple[Invoice, list[str], list[str]]:
     warnings: list[str] = []
     if not isinstance(payload, dict):
         return Invoice(), list(EXPECTED_FIELDS), ["La respuesta del modelo no era un objeto JSON válido."]
+
+    for label, raw in (
+        ("emisor", _pick(payload, KEY_ALIASES["seller"])),
+        ("receptor", _pick(payload, KEY_ALIASES["buyer"])),
+    ):
+        if isinstance(raw, dict):
+            raw_tax_id = _pick(raw, PARTY_ALIASES["tax_id"])
+            if _clean_str(raw_tax_id) is not None and _looks_like_placeholder(_clean_str(raw_tax_id)):
+                warnings.append(
+                    f"El NIF/CIF del {label} no se pudo extraer con certeza; el valor devuelto "
+                    "por el modelo era un texto de relleno y se descartó."
+                )
 
     invoice = Invoice(
         invoice_number=_clean_str(_pick(payload, KEY_ALIASES["invoice_number"])),
@@ -351,7 +401,12 @@ def _check_consistency(invoice: Invoice) -> list[str]:
 
     lines_total = sum(line.total for line in invoice.lines if line.total is not None)
     if invoice.lines and subtotal is not None and any(line.total is not None for line in invoice.lines):
-        if abs(lines_total - subtotal) > 0.02:
+        vat_amounts = [t.amount for t in taxes if t.amount is not None]
+        vat_total = sum(vat_amounts) if vat_amounts else 0.0
+        gross_total = subtotal + vat_total
+        # Las líneas pueden venir con IVA incluido (importe bruto) o sin él (base).
+        # Solo se avisa si la suma no cuadra con ninguna de las dos interpretaciones.
+        if abs(lines_total - subtotal) > 0.02 and abs(lines_total - gross_total) > 0.02:
             warnings.append(
                 f"La suma de las líneas ({lines_total:.2f}) no coincide con la base imponible ({subtotal:.2f})."
             )

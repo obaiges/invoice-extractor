@@ -13,6 +13,7 @@ EXTRACTION_PROMPT = """Eres un extractor de datos de facturas. Recibirás una o 
 Extrae la información siguiendo EXACTAMENTE el esquema JSON indicado. Reglas:
 - Devuelve ÚNICAMENTE JSON válido, sin texto adicional, sin markdown.
 - Un campo que NO puedas determinar con certeza debe ir a null. Nunca inventes datos.
+- NUNCA sustituyas `null` por textos de relleno como "missing", "no disponible", "as per rules" o frases explicativas. Si no ves el NIF/CIF/VAT claramente escrito, devuelve `null`.
 - Fechas: formato ISO 8601 (YYYY-MM-DD).
 - Cantidades y precios: números (sin símbolos de moneda ni separadores de miles). Si aparece "1.234,56" es 1234.56.
 - Moneda: código ISO 4217 (EUR, USD, GBP, ...). Si no se indica, usa la moneda habitual de la factura; si es ambiguo, null.

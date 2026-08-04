@@ -146,3 +146,47 @@ class TestBuildInvoice:
         }
         _, _, warnings = build_invoice(payload)
         assert any("consistente" in w for w in warnings)
+
+    def test_lines_with_vat_included_no_warning(self):
+        payload = {
+            "subtotal": 52.07,
+            "taxes": [{"rate": 21, "amount": 10.93}],
+            "total": 63.00,
+            "lines": [{"description": "Artículo", "total": 63.00, "tax_rate": 21}],
+        }
+        _, _, warnings = build_invoice(payload)
+        assert all("no coincide" not in w for w in warnings)
+
+    def test_lines_consistent_with_subtotal_no_warning(self):
+        payload = {
+            "subtotal": 1000.0,
+            "taxes": [{"rate": 21, "amount": 210.0}],
+            "total": 1210.0,
+            "lines": [{"description": "A", "total": 1000.0}],
+        }
+        _, _, warnings = build_invoice(payload)
+        assert all("no coincide" not in w for w in warnings)
+
+    def test_lines_inconsistent_with_both_warn(self):
+        payload = {
+            "subtotal": 52.07,
+            "taxes": [{"rate": 21, "amount": 10.93}],
+            "total": 63.00,
+            "lines": [{"description": "Artículo", "total": 999.00, "tax_rate": 21}],
+        }
+        _, _, warnings = build_invoice(payload)
+        assert any("no coincide" in w for w in warnings)
+
+    def test_placeholder_tax_id_discarded_with_warning(self):
+        payload = {
+            "invoice_number": "F-1",
+            "seller": {
+                "name": "LEDUNI GLOBAL SL",
+                "tax_id": "missing_tax_id_goes_to_null_instead_as_per_rules",
+            },
+            "total": 63.00,
+        }
+        invoice, missing, warnings = build_invoice(payload)
+        assert invoice.seller.tax_id is None
+        assert "seller.tax_id" in missing
+        assert any("relleno" in w for w in warnings)
