@@ -226,7 +226,10 @@ más). Si prefieres lanzar el backend en otro puerto, actualiza `proxy.conf.json
 | PDF protegido por contraseña                     | Error claro en pantalla (HTTP 422)                              |
 | Archivo > 15 MB                                  | Error claro en pantalla (HTTP 413)                              |
 | Sin `GEMINI_API_KEY` configurada                 | Mensaje con instrucciones de configuración (HTTP 503)           |
-| Cuota agotada / clave inválida / fallo de Gemini | Mensaje accionable (HTTP 502)                                   |
+| Modelo no disponible para la cuenta (404)        | Reintento automático con el siguiente modelo de la cadena        |
+| Alta demanda temporal del modelo (503)           | Reintento y, si persiste, prueba el siguiente modelo (HTTP 502)  |
+| Cuota gratuita agotada (429)                     | Reintento breve y mensaje claro sin quemar los fallbacks (HTTP 502) |
+| Clave inválida / fallo de Gemini                 | Mensaje accionable (HTTP 502)                                    |
 | Respuesta del modelo no parseable                | Mensaje estructurado (HTTP 502), nunca una excepción sin capturar |
 
 ---

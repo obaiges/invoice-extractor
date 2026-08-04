@@ -4,17 +4,23 @@ Implementación de `ExtractionProvider` que envía las páginas del documento co
 imágenes inline (base64) a un modelo multimodal junto con un prompt estructurado
 y `response_schema` para obtener JSON controlado.
 
-Incluye una cadena de modelos de reserva: si el modelo configurado deja de estar
-disponible para la cuenta (p. ej. Google retira modelos antiguos para cuentas
-nuevas con un 404), se reintenta automáticamente con modelos más recientes.
+Robustez frente a errores de la API:
+- **404 (modelo no disponible)**: el modelo ya no existe o la cuenta no puede usarlo
+  (Google retira modelos antiguos para cuentas nuevas). Se prueba el siguiente modelo
+  de la cadena de reserva.
+- **503 (alta demanda)**: sobrecarga temporal de un modelo concreto. Se reintenta y, si
+  persiste, se prueba el siguiente modelo.
+- **429 (cuota)**: límite de peticiones de la cuenta. Se reintenta brevemente y, si
+  persiste, se devuelve un error claro (no se "queman" los modelos de reserva).
 
-Todos los errores del SDK (red, cuota, bloqueo de contenido, ...) se envuelven
-en `ExtractionError` con un mensaje accionable; nunca escapan crudos.
+Todos los errores se envuelven en `ExtractionError` con un mensaje accionable;
+nunca escapan crudos.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 
 from google import genai
 from google.genai import types
@@ -34,9 +40,20 @@ MODEL_FALLBACKS: tuple[str, ...] = (
     "gemini-2.5-flash-lite",
 )
 
+MAX_ATTEMPTS_PER_MODEL = 2
+RETRY_DELAY_SECONDS = 1.5
+
 
 class _ModelUnavailableError(Exception):
-    """El modelo pedido no existe o ya no está disponible para la cuenta."""
+    """El modelo pedido no existe o ya no está disponible para la cuenta (404)."""
+
+
+class _HighDemandError(Exception):
+    """El modelo está temporalmente sobrecargado (503)."""
+
+
+class _RateLimitError(Exception):
+    """Se alcanzó el límite de peticiones de la cuenta (429)."""
 
 
 class GeminiProvider(ExtractionProvider):
@@ -52,18 +69,56 @@ class GeminiProvider(ExtractionProvider):
 
         candidates = [self._model, *(m for m in MODEL_FALLBACKS if m != self._model)]
         unavailable: list[str] = []
+        high_demand: list[str] = []
 
         for model in candidates:
-            try:
-                return self._call(model, parts)
-            except _ModelUnavailableError as exc:
-                logger.warning("Modelo %s no disponible para esta clave (%s); probando siguiente.", model, exc)
-                unavailable.append(model)
+            for attempt in range(1, MAX_ATTEMPTS_PER_MODEL + 1):
+                try:
+                    return self._call(model, parts)
+                except _ModelUnavailableError as exc:
+                    logger.warning(
+                        "Modelo %s no disponible para esta clave (%s); probando siguiente.", model, exc
+                    )
+                    unavailable.append(model)
+                    break
+                except _HighDemandError as exc:
+                    if attempt < MAX_ATTEMPTS_PER_MODEL:
+                        logger.warning(
+                            "Modelo %s con alta demanda (intento %d/%d); reintentando.",
+                            model, attempt, MAX_ATTEMPTS_PER_MODEL,
+                        )
+                        time.sleep(RETRY_DELAY_SECONDS)
+                        continue
+                    logger.warning(
+                        "Modelo %s sigue con alta demanda tras %d intentos; probando siguiente.",
+                        model, MAX_ATTEMPTS_PER_MODEL,
+                    )
+                    high_demand.append(model)
+                    time.sleep(RETRY_DELAY_SECONDS)
+                    break
+                except _RateLimitError as exc:
+                    if attempt < MAX_ATTEMPTS_PER_MODEL:
+                        logger.warning(
+                            "Cuota de la API alcanzada (intento %d/%d); reintentando.",
+                            attempt, MAX_ATTEMPTS_PER_MODEL,
+                        )
+                        time.sleep(RETRY_DELAY_SECONDS * 2)
+                        continue
+                    raise ExtractionError(
+                        "Se alcanzó la cuota gratuita de la API de Gemini. "
+                        "Espera un momento y vuelve a intentar la extracción."
+                    ) from exc
 
+        reasons = []
+        if unavailable:
+            reasons.append(f"modelos no disponibles para esta cuenta ({', '.join(unavailable)})")
+        if high_demand:
+            reasons.append(f"modelos con alta demanda temporal ({', '.join(high_demand)})")
         raise ExtractionError(
-            "Ninguno de los modelos de Gemini configurados está disponible para esta clave de API "
-            f"({', '.join(unavailable)}). Entra en aistudio.google.com, comprueba qué modelos "
-            "admiten tu clave y actualiza GEMINI_MODEL en el fichero .env."
+            "No se pudo extraer el documento: " + "; ".join(reasons) + ". "
+            "Si fue por alta demanda, reintenta en unos segundos. Si fue por disponibilidad, "
+            "comprueba qué modelos admite tu clave en aistudio.google.com y actualiza "
+            "GEMINI_MODEL en el fichero .env."
         )
 
     def _call(self, model: str, parts: list[types.Part]) -> str:
@@ -80,6 +135,10 @@ class GeminiProvider(ExtractionProvider):
         except Exception as exc:
             if _is_model_unavailable(exc):
                 raise _ModelUnavailableError(str(exc)) from exc
+            if _is_high_demand(exc):
+                raise _HighDemandError(str(exc)) from exc
+            if _is_rate_limit(exc):
+                raise _RateLimitError(str(exc)) from exc
             message = _friendly_api_error(exc)
             raise ExtractionError(f"Error al comunicarse con la API de Gemini ({model}): {message}") from exc
 
@@ -98,8 +157,7 @@ class GeminiProvider(ExtractionProvider):
 
 def _is_model_unavailable(exc: Exception) -> bool:
     """Detecta si el error significa que el modelo no está disponible (404)."""
-    code = getattr(exc, "code", None)
-    if code == 404:
+    if getattr(exc, "code", None) == 404:
         return True
     lowered = str(exc).lower()
     return any(
@@ -113,13 +171,28 @@ def _is_model_unavailable(exc: Exception) -> bool:
     )
 
 
+def _is_high_demand(exc: Exception) -> bool:
+    """Detecta sobrecarga temporal de un modelo (503 / high demand)."""
+    if getattr(exc, "code", None) == 503:
+        return True
+    lowered = str(exc).lower()
+    return "high demand" in lowered or "currently experiencing" in lowered
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    """Detecta límite de peticiones de la cuenta (429 / quota)."""
+    code = getattr(exc, "code", None)
+    if code in (429, 500):
+        return True
+    lowered = str(exc).lower()
+    return "quota" in lowered or "rate limit" in lowered or "429" in lowered
+
+
 def _friendly_api_error(exc: Exception) -> str:
     """Convierte un error del SDK en un mensaje legible y accionable."""
     raw = str(exc)
     lowered = raw.lower()
 
-    if "quota" in lowered or "429" in raw:
-        return "se alcanzó la cuota gratuita de peticiones. Espera un momento y reintenta."
     if "permission" in lowered or "403" in raw or "api key not valid" in lowered or "invalid api key" in lowered:
         return "la clave de API no es válida o no tiene permisos para este modelo. Revísala en aistudio.google.com."
     if "model" in lowered and "not found" in lowered:
