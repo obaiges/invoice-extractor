@@ -45,7 +45,7 @@ Se ha elegido la **opción A (LLM)** con **Gemini**, con esta justificación:
 2. **No se depende de la Files API.** El backend convierte el PDF a imágenes PNG
    localmente (PyMuPDF, a 150 DPI) y las envía como bytes **inline** (base64). Esto evita
    las limitaciones de subida de ficheros del plan gratuito y mantiene el coste bajo.
-3. **Free tier.** El usuario eligió Gemini porque Google AI Studio ofrece una capa gratuita
+3. **Free tier.** Elegí Gemini porque Google AI Studio ofrece una capa gratuita
    (modelo `gemini-3.6-flash`), suficiente para una prueba y una demo.
 4. **Calidad de extracción.** La generación controlada de JSON (`response_mime_type` +
    `response_schema`) fuerza la estructura de salida, y el prompt exige `null` ante la
