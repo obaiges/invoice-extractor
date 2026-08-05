@@ -28,6 +28,7 @@ indica explícitamente ("No detectado"), nunca se omite en silencio.
 10. [API](#api)
 11. [Estructura del proyecto](#estructura-del-proyecto)
 12. [Limitaciones conocidas](#limitaciones-conocidas)
+13. [Mejoras a futuro](#mejoras-a-futuro)
 
 ---
 
@@ -366,3 +367,13 @@ Healthcheck del servicio.
   añadir esquemas y prompts adicionales (la arquitectura lo permite).
 - **Seguridad (demo local).** No hay autenticación ni almacenamiento de documentos; el
   objetivo es la extracción en memoria.
+
+---
+
+## Mejoras a futuro
+
+- Si esta aplicación fuera a producción lo primero que haría sin ningún tipo de duda es usar un modelo de pago como Claude, así aseguraría una lectura mucho mejor y no tendría límites en la cuota de la API que retrasan bastante tanto el desarrollo como las pruebas. 
+- Otra mejora que haría sería ocultar completamente toda la parte "manual" que viene a ser el hecho de importar la factura. Mediante eventos con SSE y RxJS se podría ir actualizando y extrayendo toda la información a medida que fueran entrando las facturas al servidor. En la entrevista técnica que tengamos puedo explicar este punto con más detalle.
+- Si el punto anterior fuera inviable, lo que si haría sería mejorar la aplicación para poder subir cuantas facturas se quieran al mismo tiempo y que las fuera leyendo una a una.
+- Otro punto que habría que mejorar si fuera a producción sería el hecho de verificar los formatos de los ficheros. Añadir validación por magic bytes (firmas reales de PDF/PNG/JPEG) y mover la conversión a un proceso/contenedor aislado (PyMuPDF y Pillow han tenido CVEs). Para así no fiarme de la extensión del fichero.
+Por último una mejora que haría sí o sí, sería una autenticación y un rate-limit  en el endpoint de lectura para tener un control ya que al final cada llamada nos generaría un coste.
