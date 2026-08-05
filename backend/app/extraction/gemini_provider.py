@@ -33,13 +33,19 @@ logger = logging.getLogger(__name__)
 
 # Modelos de reserva, en orden de preferencia, usados si el modelo configurado
 # en GEMINI_MODEL deja de estar disponible para la clave de API.
-MODEL_FALLBACKS: tuple[str, ...] = (
-    "gemini-3.6-flash",
+# Primero se prueban modelos "flash" completos (más capaces de leer facturas
+# con tablas) y solo como último recurso los modelos "lite".
+MODEL_FALLBACKS_FULL: tuple[str, ...] = (
     "gemini-3.5-flash",
+)
+MODEL_FALLBACKS_LITE: tuple[str, ...] = (
     "gemini-3.1-flash-lite",
     "gemini-2.5-flash-lite",
 )
 
+# El modelo configurado es el preferido: se le concede un intento extra antes
+# de degradar a los modelos de reserva.
+PRIMARY_MAX_ATTEMPTS = 3
 MAX_ATTEMPTS_PER_MODEL = 2
 RETRY_DELAY_SECONDS = 1.5
 
@@ -61,20 +67,35 @@ class GeminiProvider(ExtractionProvider):
         self._client = genai.Client(api_key=api_key)
         self._model = model
         self._temperature = temperature
+        self._last_model_used: str | None = None
+
+    @property
+    def last_model_used(self) -> str | None:
+        """Modelo que produjo la última extracción con éxito."""
+        return self._last_model_used
 
     def extract(self, images: list[bytes], mime_type: str) -> str:
         parts: list[types.Part] = [types.Part(text=EXTRACTION_PROMPT)]
         for image in images:
             parts.append(types.Part(inline_data=types.Blob(mime_type=mime_type, data=image)))
 
-        candidates = [self._model, *(m for m in MODEL_FALLBACKS if m != self._model)]
+        candidates = [
+            self._model,
+            *(m for m in MODEL_FALLBACKS_FULL if m != self._model),
+            *(m for m in MODEL_FALLBACKS_LITE if m != self._model),
+        ]
         unavailable: list[str] = []
         high_demand: list[str] = []
 
         for model in candidates:
-            for attempt in range(1, MAX_ATTEMPTS_PER_MODEL + 1):
+            max_attempts = (
+                PRIMARY_MAX_ATTEMPTS if model == self._model else MAX_ATTEMPTS_PER_MODEL
+            )
+            for attempt in range(1, max_attempts + 1):
                 try:
-                    return self._call(model, parts)
+                    result = self._call(model, parts)
+                    self._last_model_used = model
+                    return result
                 except _ModelUnavailableError as exc:
                     logger.warning(
                         "Modelo %s no disponible para esta clave (%s); probando siguiente.", model, exc
@@ -82,25 +103,25 @@ class GeminiProvider(ExtractionProvider):
                     unavailable.append(model)
                     break
                 except _HighDemandError as exc:
-                    if attempt < MAX_ATTEMPTS_PER_MODEL:
+                    if attempt < max_attempts:
                         logger.warning(
                             "Modelo %s con alta demanda (intento %d/%d); reintentando.",
-                            model, attempt, MAX_ATTEMPTS_PER_MODEL,
+                            model, attempt, max_attempts,
                         )
                         time.sleep(RETRY_DELAY_SECONDS)
                         continue
                     logger.warning(
                         "Modelo %s sigue con alta demanda tras %d intentos; probando siguiente.",
-                        model, MAX_ATTEMPTS_PER_MODEL,
+                        model, max_attempts,
                     )
                     high_demand.append(model)
                     time.sleep(RETRY_DELAY_SECONDS)
                     break
                 except _RateLimitError as exc:
-                    if attempt < MAX_ATTEMPTS_PER_MODEL:
+                    if attempt < max_attempts:
                         logger.warning(
                             "Cuota de la API alcanzada (intento %d/%d); reintentando.",
-                            attempt, MAX_ATTEMPTS_PER_MODEL,
+                            attempt, max_attempts,
                         )
                         time.sleep(RETRY_DELAY_SECONDS * 2)
                         continue

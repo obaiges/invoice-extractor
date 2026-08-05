@@ -50,10 +50,11 @@ Se ha elegido la **opción A (LLM)** con **Gemini**, con esta justificación:
 4. **Calidad de extracción.** La generación controlada de JSON (`response_mime_type` +
    `response_schema`) fuerza la estructura de salida, y el prompt exige `null` ante la
    duda, lo que se traduce directamente en el requisito de "indicar explícitamente lo que
-   no se puede extraer". Si el modelo configurado deja de estar disponible para la cuenta
-   (Google retira modelos antiguos), el proveedor **reintenta automáticamente con una
-   cadena de modelos más recientes** (`gemini-3.6-flash`, `gemini-3.5-flash`,
-   `gemini-3.1-flash-lite`, `gemini-2.5-flash-lite`) en lugar de fallar.
+   no se puede extraer". El modelo configurado (`GEMINI_MODEL`) recibe más intentos antes
+   de degradar, y la cadena de reserva prefiere los modelos **flash completos** sobre los
+   **lite** (más débiles leyendo facturas con tablas). Además, si la primera extracción
+   deja sin detectar la mayoría de los campos, el backend **reintenta una vez** de forma
+   transparente: los fallos puntuales del modelo no acaban en pantalla como "todo vacío".
 
 ### Diseño del sistema
 
@@ -261,6 +262,7 @@ Respuesta `200` (ejemplo reducido):
 ```json
 {
   "status": "success",
+  "model_used": "gemini-3.6-flash",
   "invoice": {
     "invoice_number": "INV-2024-001",
     "issue_date": "2024-03-15",
@@ -281,6 +283,8 @@ Respuesta `200` (ejemplo reducido):
 ```
 
 - `status`: `"success"` (todos los campos detectados) o `"partial"` (faltan campos).
+- `model_used`: modelo de Gemini que produjo la extracción (útil para depurar
+  si un documento sale parcial o si se activaron los modelos de reserva).
 - `missing_fields`: claves de los campos esperados que no se pudieron extraer.
 - `warnings`: avisos del modelo y anomalías de consistencia detectadas por el parser.
 
@@ -343,6 +347,11 @@ Healthcheck del servicio.
 - **Límites del free tier de Gemini.** Las claves gratuitas limitan peticiones/minuto y el
   tamaño total de las imágenes enviadas (18 MB de PNG). Documentos muy largos o en
   resoluciones muy altas pueden requerir reducción.
+- **Respuestas puntuales débiles del modelo.** Gemini devuelve a veces una extracción casi
+  vacía aunque el documento sea legible. El backend reintenta automáticamente cuando faltan
+  más de la mitad de los campos; si aun así no se recupera, el resultado se muestra como
+  "partial" con los campos faltantes marcados como "No detectado" (consulta `model_used`
+  en la respuesta para ver qué modelo respondió).
 - **Alucinación / incertidumbre del LLM.** El modelo puede inventar valores si la imagen
   es ilegible. Mitigación: el prompt ordena `null` ante la duda, el parser marca
   incoherencias aritméticas como avisos, y el frontend distingue siempre "No detectado".

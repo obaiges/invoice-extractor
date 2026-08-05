@@ -84,7 +84,25 @@ def test_fallback_when_configured_model_unavailable(monkeypatch):
 
     assert result == '{"invoice_number": "OK"}'
     assert fake.calls[0] == "gemini-2.5-flash"
-    assert "gemini-3.6-flash" in fake.calls
+    assert "gemini-3.5-flash" in fake.calls
+
+
+def test_full_flash_preferred_over_lite_fallbacks(monkeypatch):
+    fake = _FakeClient(error_factory=_unavailable("is no longer available to new users."))
+    _patch_client(monkeypatch, fake)
+
+    provider = GeminiProvider(api_key="test", model="gemini-3.6-flash")
+    with pytest.raises(ExtractionError):
+        provider.extract([b"\x89PNG fake"], "image/png")
+
+    # Orden de candidatos: configurado, flash completo y solo después los "lite".
+    assert fake.calls[0] == "gemini-3.6-flash"
+    assert fake.calls[1] == "gemini-3.5-flash"
+    lite_index = min(
+        fake.calls.index("gemini-3.1-flash-lite"),
+        fake.calls.index("gemini-2.5-flash-lite"),
+    )
+    assert fake.calls.index("gemini-3.5-flash") < lite_index
 
 
 def test_error_when_all_models_unavailable(monkeypatch):
@@ -159,6 +177,36 @@ def test_rate_limit_raises_clear_error_without_fallback(monkeypatch):
     assert "cuota" in str(excinfo.value).lower()
     # Solo se intentó el modelo configurado (sin consumir los fallbacks).
     assert set(fake.calls) == {"gemini-3.6-flash"}
+
+
+# --- Registro del modelo usado ---
+
+
+def test_last_model_used_recorded(monkeypatch):
+    fake = _FakeClient()
+    _patch_client(monkeypatch, fake)
+
+    provider = GeminiProvider(api_key="test", model="gemini-3.6-flash")
+    assert provider.last_model_used is None
+    provider.extract([b"\x89PNG fake"], "image/png")
+
+    assert provider.last_model_used == "gemini-3.6-flash"
+
+
+def test_last_model_used_reflects_fallback(monkeypatch):
+    fake = _FakeClient(
+        error_factory=lambda model: (
+            RuntimeError("This model is currently experiencing high demand.")
+            if model == "gemini-3.6-flash"
+            else None
+        )
+    )
+    _patch_client(monkeypatch, fake)
+
+    provider = GeminiProvider(api_key="test", model="gemini-3.6-flash")
+    provider.extract([b"\x89PNG fake"], "image/png")
+
+    assert provider.last_model_used == "gemini-3.5-flash"
 
 
 # --- Detección de errores ---

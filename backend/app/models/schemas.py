@@ -49,3 +49,4 @@ class ExtractionResult(BaseModel):
     invoice: Invoice = Field(default_factory=Invoice)
     missing_fields: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    model_used: str | None = None

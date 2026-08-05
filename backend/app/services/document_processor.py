@@ -13,6 +13,7 @@ sin tocar el resto de la aplicación.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from app.core.errors import (
@@ -23,8 +24,10 @@ from app.core.errors import (
 )
 from app.extraction import parser
 from app.extraction.base import ExtractionProvider
-from app.models.schemas import ExtractionResult
+from app.models.schemas import ExtractionResult, Invoice
 from app.services.pdf_converter import image_to_png, pdf_to_images
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS: dict[str, str] = {
     ".pdf": "application/pdf",
@@ -33,6 +36,11 @@ ALLOWED_EXTENSIONS: dict[str, str] = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
 }
+
+# Si la primera extracción deja sin detectar más de la mitad de los campos
+# esperados (de los 14 posibles), se reintenta una vez: el modelo devuelve a
+# veces respuestas casi vacías y un segundo intento suele recuperarlas.
+CRITICAL_MISSING_THRESHOLD = 8
 
 
 class DocumentProcessor:
@@ -63,6 +71,31 @@ class DocumentProcessor:
                 "No se pudo extraer ninguna página del documento. Asegúrate de que no está vacío."
             )
 
+        invoice, missing_fields, warnings = self._extract(images)
+
+        if len(missing_fields) >= CRITICAL_MISSING_THRESHOLD:
+            logger.warning(
+                "Extracción con %d campos faltantes (%d de umbral crítico); reintentando.",
+                len(missing_fields), CRITICAL_MISSING_THRESHOLD,
+            )
+            retry_invoice, retry_missing, retry_warnings = self._extract(images)
+            if len(retry_missing) < len(missing_fields):
+                invoice, missing_fields, warnings = (
+                    retry_invoice, retry_missing, retry_warnings,
+                )
+
+        status = "success" if not missing_fields else "partial"
+
+        return ExtractionResult(
+            status=status,
+            invoice=invoice,
+            missing_fields=missing_fields,
+            warnings=warnings,
+            model_used=getattr(self._provider, "last_model_used", None),
+        )
+
+    def _extract(self, images: list[bytes]) -> tuple[Invoice, list[str], list[str]]:
+        """Pide la extracción al proveedor y normaliza la respuesta."""
         raw_response = self._provider.extract(images, "image/png")
 
         payload = parser.extract_json_payload(raw_response)
@@ -72,15 +105,7 @@ class DocumentProcessor:
                 "Revisa la calidad del documento e inténtalo de nuevo."
             )
 
-        invoice, missing_fields, warnings = parser.build_invoice(payload)
-        status = "success" if not missing_fields else "partial"
-
-        return ExtractionResult(
-            status=status,
-            invoice=invoice,
-            missing_fields=missing_fields,
-            warnings=warnings,
-        )
+        return parser.build_invoice(payload)
 
     def _validate_file(self, extension: str, content: bytes) -> None:
         if extension not in ALLOWED_EXTENSIONS:

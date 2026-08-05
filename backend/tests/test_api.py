@@ -19,16 +19,24 @@ from tests.fixtures.generate_invoice import generate_invoice
 
 
 class FakeProvider(ExtractionProvider):
-    """Devuelve un JSON fijo simulando la respuesta del modelo."""
+    """Devuelve un JSON fijo simulando la respuesta del modelo.
 
-    def __init__(self, payload: dict) -> None:
-        self._payload = payload
+    Acepta un único `payload` (dict) o una secuencia de ellos; en este último
+    caso devuelve uno por llamada y se queda en el último para las siguientes.
+    """
+
+    def __init__(self, payload: dict | list[dict]) -> None:
+        self._payloads = [payload] if isinstance(payload, dict) else list(payload)
+        self._call_index = 0
+        self.last_model_used = "fake-model"
         self.received_images: list[bytes] = []
 
     def extract(self, images: list[bytes], mime_type: str) -> str:
         self.received_images = images
         self.mime_type = mime_type
-        return json.dumps(self._payload)
+        payload = self._payloads[min(self._call_index, len(self._payloads) - 1)]
+        self._call_index += 1
+        return json.dumps(payload)
 
 
 COMPLETE_PAYLOAD = {
@@ -79,7 +87,7 @@ def pdf_incomplete() -> bytes:
     return generate_invoice("incomplete")
 
 
-def _override(app: TestClient, payload: dict) -> FakeProvider:
+def _override(app: TestClient, payload: dict | list[dict]) -> FakeProvider:
     provider = FakeProvider(payload)
     processor = DocumentProcessor(
         provider=provider,
@@ -125,6 +133,52 @@ def test_extract_partial_invoice(client: TestClient, pdf_incomplete: bytes):
     assert "invoice_number" in body["missing_fields"]
     assert "buyer.tax_id" in body["missing_fields"]
     assert body["warnings"]
+
+
+EMPTY_PAYLOAD = {
+    "invoice_number": None,
+    "issue_date": None,
+    "due_date": None,
+    "currency": None,
+    "seller": {"name": None, "tax_id": None, "address": None},
+    "buyer": {"name": None, "tax_id": None, "address": None},
+    "lines": [],
+    "subtotal": None,
+    "taxes": [],
+    "total": None,
+    "warnings": [],
+}
+
+
+def test_extract_retries_when_critically_missing(client: TestClient, pdf_complete: bytes):
+    # Primera respuesta casi vacía (todos los campos faltan) y segunda completa:
+    # el pipeline debe reintentar y quedarse con el mejor resultado.
+    provider = _override(client, [EMPTY_PAYLOAD, COMPLETE_PAYLOAD])
+    response = client.post(
+        "/api/v1/documents/extract",
+        files={"file": ("factura.pdf", pdf_complete, "application/pdf")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["missing_fields"] == []
+    assert body["invoice"]["invoice_number"] == "INV-2024-001"
+    assert body["invoice"]["total"] == 1391.5
+    assert provider._call_index == 2, "el pipeline debió reintentar la extracción"
+    assert body["model_used"] == "fake-model"
+
+
+def test_extract_does_not_retry_beyond_once(client: TestClient, pdf_complete: bytes):
+    # Dos respuestas casi vacías: se reintenta una única vez y se devuelve partial
+    # (sin bucle infinito y sin error).
+    provider = _override(client, [EMPTY_PAYLOAD, EMPTY_PAYLOAD])
+    response = client.post(
+        "/api/v1/documents/extract",
+        files={"file": ("factura.pdf", pdf_complete, "application/pdf")},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "partial"
+    assert provider._call_index == 2
 
 
 def test_extract_image(client: TestClient):
