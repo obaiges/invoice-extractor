@@ -254,11 +254,53 @@ def _looks_like_placeholder(value: str) -> bool:
 
 
 def _clean_tax_id(value: object) -> str | None:
-    """Limpia un NIF/CIF/VAT y descarta valores placeholder."""
+    """Limpia y VALIDA un NIF/CIF/VAT español.
+
+    Solo se aceptan identificadores que encajen al 100% con los formatos
+    oficiales; cualquier otro valor (números de factura/pedido, referencias,
+    textos de relleno...) se descarta y el campo queda vacío ("No detectado").
+    """
     cleaned = _clean_str(value)
     if cleaned is None or _looks_like_placeholder(cleaned):
         return None
-    return cleaned
+    normalized = _normalize_tax_id_format(cleaned)
+    return normalized if _matches_spanish_tax_id(normalized) else None
+
+
+# Formatos oficiales de identificación fiscal española (validación estricta).
+_SPANISH_TAX_ID_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^[0-9]{8}[A-Z]$"),                        # DNI / NIF persona física
+    re.compile(r"^[XYZ][0-9]{7}[A-Z]$"),                   # NIE
+    re.compile(r"^[ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-J]$"),  # NIF/CIF persona jurídica
+)
+
+
+def _matches_spanish_tax_id(value: str) -> bool:
+    """True si el valor (ya normalizado) es un DNI/NIE/CIF válido."""
+    return any(pattern.fullmatch(value) for pattern in _SPANISH_TAX_ID_PATTERNS)
+
+
+def _normalize_tax_id_format(value: str) -> str:
+    """Normaliza el identificador a mayúsculas sin separadores ni prefijo de país.
+
+    - Quita etiquetas delante del valor ("NIF/CIF:", "IVA", ...).
+    - Quita espacios, puntos y guiones ("77.777.777-B" → "77777777B").
+    - Si lleva prefijo de país tipo "ES" (IVA europeo, p. ej. "ESB87812681"),
+      lo elimina para guardar el formato canónico español.
+    """
+    s = value.strip().upper()
+    for prefix in (
+        "NIF/CIF:", "CIF/NIF:", "NIF:", "CIF:", "DNI:", "NIE:",
+        "TAX ID:", "VAT ID:", "VAT NO:", "VAT:", "IVA:",
+        "NIF ", "CIF ", "DNI ", "NIE ", "IVA ", "VAT ",
+    ):
+        if s.startswith(prefix):
+            s = s[len(prefix):].strip()
+            break
+    s = re.sub(r"[\s.\-]", "", s)
+    if len(s) > 9 and s[:2].isalpha() and _matches_spanish_tax_id(s[2:]):
+        return s[2:]
+    return s
 
 
 def _parse_party(raw: object) -> Party:
