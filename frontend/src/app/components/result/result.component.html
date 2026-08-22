@@ -93,6 +93,12 @@
         <span>Base imponible</span>
         <span>{{ money(invoice.subtotal) ?? 'No detectado' }}</span>
       </div>
+      @if (invoice.shipping_handling != null) {
+        <div class="totals-row">
+          <span>Envío y gestión</span>
+          <span>{{ money(invoice.shipping_handling) }}</span>
+        </div>
+      }
       @for (tax of invoice.taxes; track $index) {
         <div class="totals-row">
           <span>IVA {{ tax.rate != null ? tax.rate + ' %' : '' }}</span>

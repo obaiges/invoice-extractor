@@ -31,6 +31,11 @@ KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "due_date": ("due_date", "dueDate", "vencimiento", "fecha_vencimiento", "fecha_vto"),
     "currency": ("currency", "moneda", "divisa"),
     "subtotal": ("subtotal", "base_imponible", "base", "baseImponible", "subTotal"),
+    "shipping_handling": (
+        "shipping_handling", "shippingHandling", "shipping_and_handling",
+        "gastos_envio", "gastos_de_envio", "gastos_envio_y_gestion",
+        "gastos_gestion", "portes", "envio_y_gestion",
+    ),
     "total": ("total", "importe_total", "importeTotal", "total_factura"),
     "seller": ("seller", "emisor", "issuer", "vendedor", "proveedor"),
     "buyer": ("buyer", "receptor", "cliente", "customer", "comprador"),
@@ -380,6 +385,7 @@ def build_invoice(payload: object) -> tuple[Invoice, list[str], list[str]]:
         buyer=_parse_party(_pick(payload, KEY_ALIASES["buyer"])),
         lines=_parse_lines(_pick(payload, KEY_ALIASES["lines"])),
         subtotal=to_float(_pick(payload, KEY_ALIASES["subtotal"])),
+        shipping_handling=to_float(_pick(payload, KEY_ALIASES["shipping_handling"])),
         taxes=_parse_taxes(_pick(payload, KEY_ALIASES["taxes"])),
         total=to_float(_pick(payload, KEY_ALIASES["total"])),
     )
@@ -446,15 +452,25 @@ def _check_consistency(invoice: Invoice) -> list[str]:
         vat_amounts = [t.amount for t in taxes if t.amount is not None]
         vat_total = sum(vat_amounts) if vat_amounts else 0.0
         gross_total = subtotal + vat_total
-        # Las líneas pueden venir con IVA incluido (importe bruto) o sin él (base).
-        # Solo se avisa si la suma no cuadra con ninguna de las dos interpretaciones.
-        if abs(lines_total - subtotal) > 0.02 and abs(lines_total - gross_total) > 0.02:
+        # Las líneas pueden venir con IVA incluido (importe bruto) o sin él (base),
+        # y pueden incluir los gastos de envío y gestión. Solo se avisa si la suma
+        # no cuadra con ninguna de las interpretaciones.
+        expected_subtotals: list[float] = [subtotal]
+        if invoice.shipping_handling is not None:
+            expected_subtotals.append(subtotal + invoice.shipping_handling)
+        if all(abs(lines_total - s) > 0.02 for s in expected_subtotals) and abs(lines_total - gross_total) > 0.02:
             warnings.append(
                 f"La suma de las líneas ({lines_total:.2f}) no coincide con la base imponible ({subtotal:.2f})."
             )
 
     if subtotal is not None and taxes and all(t.amount is not None for t in taxes):
-        if abs(subtotal + sum(t.amount for t in taxes) - (total if total is not None else subtotal + sum(t.amount for t in taxes))) > 0.02:
+        # Los gastos de envío y gestión pueden venir ya incluidos en la base
+        # imponible o sumarse aparte hasta el total; ambas interpretaciones son válidas.
+        vat_total = sum(t.amount for t in taxes)
+        expected_totals = [subtotal + vat_total]
+        if invoice.shipping_handling is not None:
+            expected_totals.append(expected_totals[0] + invoice.shipping_handling)
+        if total is not None and not any(abs(total - expected) <= 0.02 for expected in expected_totals):
             warnings.append("El importe de impuestos no es consistente con la base imponible y el total.")
 
     if subtotal is not None and taxes and all(t.rate is not None for t in taxes):
@@ -462,7 +478,13 @@ def _check_consistency(invoice: Invoice) -> list[str]:
             if tax.amount is None:
                 continue
             expected = subtotal * tax.rate / 100.0
-            if abs(expected - tax.amount) > 0.02:
+            if (
+                abs(expected - tax.amount) > 0.02
+                and not (
+                    invoice.shipping_handling is not None
+                    and abs((subtotal + invoice.shipping_handling) * tax.rate / 100.0 - tax.amount) <= 0.02
+                )
+            ):
                 warnings.append(
                     f"El impuesto al {tax.rate:.2f}% no coincide con su importe "
                     f"(esperado {expected:.2f}, extraído {tax.amount:.2f})."

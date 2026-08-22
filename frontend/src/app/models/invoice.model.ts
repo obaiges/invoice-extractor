@@ -26,6 +26,7 @@ export interface Invoice {
   buyer: Party;
   lines: InvoiceLine[];
   subtotal: number | null;
+  shipping_handling: number | null;
   taxes: TaxEntry[];
   total: number | null;
 }

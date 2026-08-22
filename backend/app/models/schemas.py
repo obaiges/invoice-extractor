@@ -40,6 +40,7 @@ class Invoice(BaseModel):
     buyer: Party = Field(default_factory=Party)
     lines: list[InvoiceLine] = Field(default_factory=list)
     subtotal: float | None = None
+    shipping_handling: float | None = None  # gastos de envío y gestión, si se desglosan
     taxes: list[TaxEntry] = Field(default_factory=list)
     total: float | None = None
 

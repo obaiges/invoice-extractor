@@ -21,6 +21,7 @@ Extrae la información siguiendo EXACTAMENTE el esquema JSON indicado. Reglas:
 - En `lines`, cada línea de detalle de la factura (descripción, cantidad, precio unitario e importe). Si una línea tiene IVA, indica su tipo en `tax_rate`.
 - En `taxes`, el desglose de impuestos: un elemento por tipo de IVA con su `rate` (%) y `amount` (importe en la moneda de la factura).
 - `subtotal` = base imponible. `total` = importe final de la factura.
+- `shipping_handling` = gastos de envío, transporte o gestión SOLO si aparecen desglosados como importe propio fuera del subtotal. Si no se desglosan o ya están incluidos en la base imponible, null.
 - En `warnings` indica, en lenguaje natural, cualquier anomalía detectada (p. ej. "El importe de IVA no es consistente con el total"). Si no hay anomalías, devuelve un array vacío.
 """
 
@@ -77,6 +78,13 @@ INVOICE_SCHEMA = {
             },
         },
         "subtotal": {"type": "NUMBER", "description": "Base imponible."},
+        "shipping_handling": {
+            "type": "NUMBER",
+            "description": (
+                "Gastos de envío, transporte o gestión desglosados aparte, "
+                "si la factura los lista. Null si no existen o van incluidos en la base."
+            ),
+        },
         "taxes": {
             "type": "ARRAY",
             "description": "Desglose de impuestos por tipo de IVA.",

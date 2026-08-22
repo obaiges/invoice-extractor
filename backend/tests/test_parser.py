@@ -190,3 +190,51 @@ class TestBuildInvoice:
         assert invoice.seller.tax_id is None
         assert "seller.tax_id" in missing
         assert any("relleno" in w for w in warnings)
+
+
+class TestShippingHandling:
+    def test_parsed_from_alias_and_consistent_total(self):
+        payload = {
+            "subtotal": 1000,
+            "gastos_envio_y_gestion": 20,
+            "taxes": [{"rate": 21, "amount": 214.20}],
+            "total": 1234.20,
+        }
+        invoice, _, warnings = build_invoice(payload)
+        assert invoice.shipping_handling == 20.0
+        assert all("consistente" not in w for w in warnings)
+
+    def test_shipping_included_in_subtotal_no_warning(self):
+        # El envío ya está dentro de la base imponible: ambas lecturas son válidas.
+        payload = {
+            "subtotal": 1020,
+            "shipping_handling": 20,
+            "taxes": [{"rate": 21, "amount": 214.20}],
+            "total": 1234.20,
+        }
+        _, _, warnings = build_invoice(payload)
+        assert all("consistente" not in w for w in warnings)
+
+    def test_missing_shipping_still_warns_when_totals_mismatch(self):
+        payload = {
+            "subtotal": 1000,
+            "taxes": [{"rate": 21, "amount": 210}],
+            "total": 1250,
+        }
+        _, _, warnings = build_invoice(payload)
+        assert any("consistente" in w for w in warnings)
+
+    def test_rate_computed_over_subtotal_plus_shipping_no_warning(self):
+        payload = {
+            "subtotal": 1000,
+            "shipping_handling": 10,
+            "taxes": [{"rate": 21, "amount": 212.10}],
+            "total": 1222.10,
+        }
+        _, _, warnings = build_invoice(payload)
+        assert all("no coincide" not in w for w in warnings)
+
+    def test_shipping_not_reported_as_missing_field(self):
+        invoice, missing, _ = build_invoice({})
+        assert invoice.shipping_handling is None
+        assert all("shipping" not in field for field in missing)
