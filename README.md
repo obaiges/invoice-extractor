@@ -1,6 +1,6 @@
-# Zebra Invoice Extractor
+# Invoice Extractor
 
-Aplicación para la prueba técnica de **Zebra Ventures**: el usuario importa una factura
+Aplicación en la que usuario importa una factura
 (PDF o imagen), el sistema extrae sus campos mediante **Gemini API** y los presenta en
 pantalla de forma estructurada. Cualquier campo que no se pueda extraer con certeza se
 indica explícitamente ("No detectado"), nunca se omite en silencio.
